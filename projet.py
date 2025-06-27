@@ -2,11 +2,12 @@ import numpy as np
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import datetime
+import os
 
 # Import optionnel de reportlab pour la génération de PDF
 try:
     from reportlab.lib.pagesizes import letter, A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.lib import colors
@@ -15,8 +16,36 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
     print("Module reportlab non trouvé. Pour installer : pip install reportlab")
 
+def creer_histogramme_pour_pdf(notes, nb_classes, titre="Histogramme", fichier_sortie=None):
+    """Crée un histogramme et le sauvegarde pour l'inclusion dans le PDF"""
+    if fichier_sortie is None:
+        fichier_sortie = f"histogramme_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    
+    # Créer l'histogramme avec un style simple et professionnel
+    plt.figure(figsize=(8, 5))
+    plt.hist(notes, bins=nb_classes, color='#4472C4', alpha=0.7, edgecolor='#2E4B8C', linewidth=1)
+    
+    plt.title(titre, fontsize=14, fontweight='bold', color='#2E4B8C', pad=20)
+    plt.xlabel("Notes", fontsize=12, color='#333333')
+    plt.ylabel("Effectif", fontsize=12, color='#333333')
+    plt.grid(axis='y', linestyle='-', linewidth=0.5, color='#E0E0E0', alpha=0.8)
+    
+    # Améliorer l'apparence générale
+    plt.tight_layout()
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['left'].set_color('#CCCCCC')
+    plt.gca().spines['bottom'].set_color('#CCCCCC')
+    
+    # Sauvegarder l'image
+    plt.savefig(fichier_sortie, dpi=200, bbox_inches='tight', facecolor='white')
+    plt.close()  # Fermer la figure pour libérer la mémoire
+    
+    return fichier_sortie
+
 def generer_rapport_pdf(stats1=None, stats2=None, fichier1="", fichier2="", 
-                       ic1=None, ic2=None, test_results=None, chi2_result=None, alpha_values=None):
+                       ic1=None, ic2=None, test_results=None, chi2_result=None, alpha_values=None,
+                       notes1=None, notes2=None, nb_classes=10):
     """Génère un rapport PDF des résultats statistiques"""
     if not REPORTLAB_AVAILABLE:
         print("Impossible de générer le PDF : module reportlab non installé.")
@@ -26,6 +55,10 @@ def generer_rapport_pdf(stats1=None, stats2=None, fichier1="", fichier2="",
     doc = SimpleDocTemplate(filename, pagesize=A4)
     styles = getSampleStyleSheet()
     story = []
+    
+    # Variables pour les fichiers temporaires d'histogrammes
+    hist_file1 = None
+    hist_file2 = None
     
     # Titre principal
     title_style = ParagraphStyle(
@@ -87,6 +120,63 @@ def generer_rapport_pdf(stats1=None, stats2=None, fichier1="", fichier2="",
         """
         story.append(Paragraph(interpretation, styles['Normal']))
         story.append(Spacer(1, 20))
+        
+        # Histogramme pour fichier1
+        if notes1 is not None:
+            story.append(Paragraph("Histogramme :", styles['Heading4']))
+            hist_file1 = creer_histogramme_pour_pdf(notes1, nb_classes, f"Histogramme de {fichier1}")
+            img1 = Image(hist_file1, width=5*inch, height=3*inch)
+            story.append(img1)
+            story.append(Spacer(1, 20))
+        
+        # Tableau pour fichier2 s'il existe
+        if stats2:
+            story.append(Paragraph(f"Fichier : {fichier2}", styles['Heading3']))
+            data2 = [
+                ['Indicateur', 'Valeur'],
+                ['Nombre d\'observations', f"{stats2['n']}"],
+                ['Moyenne', f"{stats2['moyenne']:.2f}"],
+                ['Écart-type', f"{stats2['ecart_type']:.2f}"],
+                ['1er quartile (Q1)', f"{stats2['q1']:.2f}"],
+                ['3ème quartile (Q3)', f"{stats2['q3']:.2f}"],
+                ['Kurtosis', f"{stats2['kurtosis']:.2f}"],
+                ['Skewness', f"{stats2['skewness']:.2f}"]
+            ]
+            
+            table2 = Table(data2)
+            table2.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(table2)
+            story.append(Spacer(1, 20))
+            
+            # Interprétation pour fichier2
+            story.append(Paragraph("Interprétation :", styles['Heading4']))
+            interpretation2 = f"""
+            L'échantillon contient {stats2['n']} observations. La moyenne des notes est de {stats2['moyenne']:.2f} 
+            avec un écart-type de {stats2['ecart_type']:.2f}. 50% des notes sont comprises entre {stats2['q1']:.2f} et {stats2['q3']:.2f}.
+            
+            La kurtosis de {stats2['kurtosis']:.2f} indique une distribution {'plus aplatie' if stats2['kurtosis'] < 0 else 'plus pointue'} 
+            que la normale. La skewness de {stats2['skewness']:.2f} révèle une asymétrie 
+            {'vers la gauche' if stats2['skewness'] < 0 else 'vers la droite'}.
+            """
+            story.append(Paragraph(interpretation2, styles['Normal']))
+            story.append(Spacer(1, 20))
+            
+            # Histogramme pour fichier2
+            if notes2 is not None:
+                story.append(Paragraph("Histogramme :", styles['Heading4']))
+                hist_file2 = creer_histogramme_pour_pdf(notes2, nb_classes, f"Histogramme de {fichier2}")
+                img2 = Image(hist_file2, width=5*inch, height=3*inch)
+                story.append(img2)
+                story.append(Spacer(1, 20))
     
     # Statistiques inférentielles
     if ic1 and test_results:
@@ -130,17 +220,38 @@ def generer_rapport_pdf(stats1=None, stats2=None, fichier1="", fichier2="",
     
     # Conclusion
     story.append(Spacer(1, 20))
-    story.append(Paragraph("3. CONCLUSION", styles['Heading2']))
-    conclusion = """
-    Cette analyse statistique permet de caractériser la distribution des notes et de tester
-    certaines hypothèses. Les résultats des tests d'hypothèses indiquent si les différences
-    observées sont statistiquement significatives.
-    """
+    if ic1 and test_results:
+        story.append(Paragraph("3. CONCLUSION", styles['Heading2']))
+        conclusion = """
+        Cette analyse statistique permet de caractériser la distribution des notes et de tester
+        certaines hypothèses. Les résultats des tests d'hypothèses indiquent si les différences
+        observées sont statistiquement significatives.
+        """
+    else:
+        story.append(Paragraph("2. CONCLUSION", styles['Heading2']))
+        conclusion = """
+        Cette analyse descriptive permet de caractériser la distribution des notes de l'échantillon étudié.
+        Les indicateurs calculés donnent une vue d'ensemble de la performance des étudiants et de la
+        forme de la distribution des résultats.
+        """
     story.append(Paragraph(conclusion, styles['Normal']))
     
     # Génération du PDF
     doc.build(story)
     print(f"\nRapport PDF généré : {filename}")
+    
+    # Nettoyer les fichiers temporaires d'histogrammes
+    if hist_file1:
+        try:
+            os.remove(hist_file1)
+        except:
+            pass
+    if hist_file2:
+        try:
+            os.remove(hist_file2)
+        except:
+            pass
+    
     return filename
 
 def lire_fichier_notes(path):
@@ -224,6 +335,11 @@ def menu():
             stats_notes = statistiques_descriptives(notes)
             afficher_statistiques(stats_notes, titre=fichier)
             afficher_histogramme(notes, nb_classes, titre=f"Histogramme de {fichier}")
+            
+            # Générer rapport PDF pour les statistiques descriptives
+            generer_pdf = input("\nGénérer un rapport PDF des statistiques descriptives ? (o/n) : ")
+            if generer_pdf.lower() == 'o':
+                generer_rapport_pdf(stats1=stats_notes, fichier1=fichier, notes1=notes, nb_classes=nb_classes)
         elif choix == "2":
             fichier1 = input("Nom du 1er fichier de notes : ")
             fichier2 = input("Nom du 2ème fichier de notes : ")
@@ -276,7 +392,11 @@ def menu():
                 chi2_res = {'chi2': chi2, 'p': p_chi2, 'rejet': rejet_chi2}
                 stats1 = statistiques_descriptives(notes1)
                 stats2 = statistiques_descriptives(notes2)
-                generer_rapport_pdf(stats1, stats2, fichier1, fichier2, ic1, ic2, test_res, chi2_res, alpha_vals)
+                # Créer et sauvegarder les histogrammes
+                histo1_path = creer_histogramme_pour_pdf(notes1, nb_classes, titre=f"Histogramme de {fichier1}")
+                histo2_path = creer_histogramme_pour_pdf(notes2, nb_classes, titre=f"Histogramme de {fichier2}")
+                # Inclure les chemins des histogrammes dans le rapport
+                generer_rapport_pdf(stats1, stats2, fichier1, fichier2, ic1, ic2, test_res, chi2_res, alpha_vals, notes1, notes2, nb_classes)
         elif choix == "0":
             break
         else:
