@@ -1,6 +1,147 @@
 import numpy as np
 import scipy.stats as stats
 import matplotlib.pyplot as plt
+import datetime
+
+# Import optionnel de reportlab pour la génération de PDF
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    print("Module reportlab non trouvé. Pour installer : pip install reportlab")
+
+def generer_rapport_pdf(stats1=None, stats2=None, fichier1="", fichier2="", 
+                       ic1=None, ic2=None, test_results=None, chi2_result=None, alpha_values=None):
+    """Génère un rapport PDF des résultats statistiques"""
+    if not REPORTLAB_AVAILABLE:
+        print("Impossible de générer le PDF : module reportlab non installé.")
+        return None
+        
+    filename = f"rapport_statistiques_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    doc = SimpleDocTemplate(filename, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Titre principal
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        textColor=colors.darkblue,
+        alignment=1  # Centré
+    )
+    story.append(Paragraph("RAPPORT D'ANALYSE STATISTIQUE", title_style))
+    story.append(Spacer(1, 12))
+    
+    # Date
+    story.append(Paragraph(f"Date : {datetime.datetime.now().strftime('%d/%m/%Y')}", styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Statistiques descriptives
+    if stats1:
+        story.append(Paragraph("1. STATISTIQUES DESCRIPTIVES", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        # Tableau pour fichier1
+        story.append(Paragraph(f"Fichier : {fichier1}", styles['Heading3']))
+        data1 = [
+            ['Indicateur', 'Valeur'],
+            ['Nombre d\'observations', f"{stats1['n']}"],
+            ['Moyenne', f"{stats1['moyenne']:.2f}"],
+            ['Écart-type', f"{stats1['ecart_type']:.2f}"],
+            ['1er quartile (Q1)', f"{stats1['q1']:.2f}"],
+            ['3ème quartile (Q3)', f"{stats1['q3']:.2f}"],
+            ['Kurtosis', f"{stats1['kurtosis']:.2f}"],
+            ['Skewness', f"{stats1['skewness']:.2f}"]
+        ]
+        
+        table1 = Table(data1)
+        table1.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(table1)
+        story.append(Spacer(1, 20))
+        
+        # Interprétation statistiques descriptives
+        story.append(Paragraph("Interprétation :", styles['Heading4']))
+        interpretation = f"""
+        L'échantillon contient {stats1['n']} observations. La moyenne des notes est de {stats1['moyenne']:.2f} 
+        avec un écart-type de {stats1['ecart_type']:.2f}. 50% des notes sont comprises entre {stats1['q1']:.2f} et {stats1['q3']:.2f}.
+        
+        La kurtosis de {stats1['kurtosis']:.2f} indique une distribution {'plus aplatie' if stats1['kurtosis'] < 0 else 'plus pointue'} 
+        que la normale. La skewness de {stats1['skewness']:.2f} révèle une asymétrie 
+        {'vers la gauche' if stats1['skewness'] < 0 else 'vers la droite'}.
+        """
+        story.append(Paragraph(interpretation, styles['Normal']))
+        story.append(Spacer(1, 20))
+    
+    # Statistiques inférentielles
+    if ic1 and test_results:
+        story.append(Paragraph("2. STATISTIQUES INFÉRENTIELLES", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        # Intervalles de confiance
+        story.append(Paragraph("2.1 Intervalles de confiance", styles['Heading3']))
+        ic_text = f"""
+        Intervalle de confiance à {100*(1-alpha_values['ic']):.0f}% pour {fichier1} : 
+        [{ic1[0]:.2f}, {ic1[1]:.2f}]
+        """
+        if ic2:
+            ic_text += f"""
+            Intervalle de confiance à {100*(1-alpha_values['ic']):.0f}% pour {fichier2} : 
+            [{ic2[0]:.2f}, {ic2[1]:.2f}]
+            """
+        story.append(Paragraph(ic_text, styles['Normal']))
+        story.append(Spacer(1, 12))
+        
+        # Tests de moyenne
+        story.append(Paragraph("2.2 Tests de moyenne", styles['Heading3']))
+        test_text = f"""
+        Test pour {fichier1} (H₀: μ = 10.5) :
+        • Statistique t = {test_results['t1']:.2f}
+        • p-value = {test_results['p1']:.3f}
+        • Conclusion : {'Rejet' if test_results['rejet1'] else 'Non rejet'} de H₀ au seuil {alpha_values['test']}
+        """
+        story.append(Paragraph(test_text, styles['Normal']))
+        story.append(Spacer(1, 12))
+        
+        # Test du chi-deux
+        if chi2_result:
+            story.append(Paragraph("2.3 Test d'indépendance du χ²", styles['Heading3']))
+            chi2_text = f"""
+            • Statistique χ² = {chi2_result['chi2']:.2f}
+            • p-value = {chi2_result['p']:.3f}
+            • Conclusion : {'Rejet' if chi2_result['rejet'] else 'Non rejet'} de l'indépendance au seuil {alpha_values['chi2']}
+            """
+            story.append(Paragraph(chi2_text, styles['Normal']))
+    
+    # Conclusion
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("3. CONCLUSION", styles['Heading2']))
+    conclusion = """
+    Cette analyse statistique permet de caractériser la distribution des notes et de tester
+    certaines hypothèses. Les résultats des tests d'hypothèses indiquent si les différences
+    observées sont statistiquement significatives.
+    """
+    story.append(Paragraph(conclusion, styles['Normal']))
+    
+    # Génération du PDF
+    doc.build(story)
+    print(f"\nRapport PDF généré : {filename}")
+    return filename
 
 def lire_fichier_notes(path):
     with open(path, "r") as f:
@@ -126,6 +267,16 @@ def menu():
                 print("  Les moyennes sont identiques.")
 
             print("  Voir les p-values pour la significativité statistique des tests.")
+            
+            # Générer rapport PDF
+            generer_pdf = input("\nGénérer un rapport PDF ? (o/n) : ")
+            if generer_pdf.lower() == 'o':
+                alpha_vals = {'ic': alpha_ic, 'test': alpha_test, 'chi2': alpha_chi2}
+                test_res = {'t1': t1, 'p1': p1, 'rejet1': rejet1, 't2': t2, 'p2': p2, 'rejet2': rejet2}
+                chi2_res = {'chi2': chi2, 'p': p_chi2, 'rejet': rejet_chi2}
+                stats1 = statistiques_descriptives(notes1)
+                stats2 = statistiques_descriptives(notes2)
+                generer_rapport_pdf(stats1, stats2, fichier1, fichier2, ic1, ic2, test_res, chi2_res, alpha_vals)
         elif choix == "0":
             break
         else:
